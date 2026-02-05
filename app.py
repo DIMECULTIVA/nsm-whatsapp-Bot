@@ -6,38 +6,48 @@ import google.generativeai as genai
 app = Flask(__name__)
 
 # --- CONFIGURATION ---
+# Get the key from Render's Environment Variables
 GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')
 
 if not GOOGLE_API_KEY:
-    print("CRITICAL ERROR: Google API Key is missing from Environment Variables!")
+    print("CRITICAL ERROR: Google API Key is missing!")
 else:
-    # Clean the key in case there are accidental spaces
+    # Clean the key just in case
     GOOGLE_API_KEY = GOOGLE_API_KEY.strip().replace('"', '').replace("'", "")
     genai.configure(api_key=GOOGLE_API_KEY)
 
-# --- DEBUGGING: PRINT AVAILABLE MODELS ---
-# This will show up in your Render Logs so we know what works
-try:
-    print("--- CHECKING AVAILABLE MODELS ---")
-    for m in genai.list_models():
-        if 'generateContent' in m.supported_generation_methods:
-            print(f"Found model: {m.name}")
-    print("--- END MODEL CHECK ---")
-except Exception as e:
-    print(f"Error checking models: {e}")
+# --- THE BRAIN ---
+# Using the model we confirmed exists in your logs
+model = genai.GenerativeModel('gemini-2.0-flash')
 
-# Use the most standard model name
-model = genai.GenerativeModel('gemini-1.5-flash')
-
+# --- THE PERSONA ---
 SYSTEM_PROMPT = """
 You are NSM ARCHITECTS’ official WhatsApp AI Assistant. 
-Your goal is to professionally engage with clients.
+Your goal is to professionally engage with clients, qualify leads, and guide them to book a consultation.
+
+COMPANY CONTEXT:
+- Name: NSM ARCHITECTS
+- Location: South Africa
+- Services: Residential (New builds, renovations), Commercial, Council Submissions.
+- Contact: 076 308 8254 | info@nsmarch.co.za
 
 RULES:
-1. Keep replies concise (max 3 short paragraphs).
+1. NEVER give specific construction prices.
 2. ASK ONE QUESTION AT A TIME.
+3. Keep replies concise (max 3 short paragraphs).
+4. If a user asks for structural/legal advice, escalate to human.
+
+LEAD QUALIFICATION FLOW:
+1. Project Type? (Residential / Commercial)
+2. Location?
+3. New Build or Renovation?
+4. Timeline?
+5. Budget?
+
+If qualified, ask for Name and Email.
 """
 
+# Simple memory storage
 conversation_history = {}
 
 @app.route('/whatsapp', methods=['POST'])
@@ -47,6 +57,7 @@ def whatsapp_reply():
 
     print(f"Message from {sender_phone}: {incoming_msg}")
 
+    # Initialize chat history if new user
     if sender_phone not in conversation_history:
         conversation_history[sender_phone] = model.start_chat(history=[
             {"role": "user", "parts": SYSTEM_PROMPT},
@@ -56,14 +67,18 @@ def whatsapp_reply():
     chat_session = conversation_history[sender_phone]
 
     try:
+        # Send message to Google Gemini
         response = chat_session.send_message(incoming_msg)
         bot_reply = response.text
+        
     except Exception as e:
-        print(f"CRITICAL ERROR talking to Google: {e}")
+        print(f"Error talking to Google: {e}")
         bot_reply = "I apologize, I am currently connecting to our architectural database. Please try again in a moment."
 
+    # Send response back to Twilio
     resp = MessagingResponse()
     resp.message(bot_reply)
+
     return str(resp)
 
 if __name__ == '__main__':
