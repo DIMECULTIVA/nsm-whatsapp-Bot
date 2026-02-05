@@ -1,6 +1,6 @@
 import os
 import datetime
-import time  # <--- NEW TOOL FOR WAITING
+import time  # For waiting
 from flask import Flask, request
 from twilio.twiml.messaging_response import MessagingResponse
 import google.generativeai as genai
@@ -30,8 +30,12 @@ if GOOGLE_API_KEY:
     GOOGLE_API_KEY = GOOGLE_API_KEY.strip().replace('"', '').replace("'", "")
     genai.configure(api_key=GOOGLE_API_KEY)
 
-# Using the Lite model (Faster & Cheaper)
-model = genai.GenerativeModel('gemini-2.0-flash-lite')
+# Using the Experimental Model (Less traffic, fewer 429 errors)
+try:
+    model = genai.GenerativeModel('gemini-2.0-flash-exp')
+except:
+    # Fallback to standard if experimental is missing
+    model = genai.GenerativeModel('gemini-2.0-flash-lite')
 
 # --- 3. THE SMART PERSONA ---
 SYSTEM_PROMPT = """
@@ -81,9 +85,9 @@ def whatsapp_reply():
     chat_session = conversation_history[sender_phone]
     bot_reply = "I apologize, connection error. Please try again." # Default fallback
 
-    # --- RETRY LOOP (THE FIX) ---
-    # Try 3 times before giving up
-    for attempt in range(3):
+    # --- RETRY LOOP (OPTIMIZED FOR WHATSAPP) ---
+    # Try only 2 times with a 5-second wait to beat the 15s Twilio timeout
+    for attempt in range(2):
         try:
             # Send message to AI
             response = chat_session.send_message(incoming_msg)
@@ -92,11 +96,12 @@ def whatsapp_reply():
             
         except Exception as e:
             if "429" in str(e): # If error is "Resource Exhausted"
-                print(f"Hit Rate Limit. Waiting 4 seconds... (Attempt {attempt+1}/3)")
-                time.sleep(4) # Wait and try again
+                print(f"Hit Rate Limit. Waiting 5 seconds... (Attempt {attempt+1}/2)")
+                time.sleep(5) # Wait 5 seconds
             else:
                 print(f"Error talking to Google: {e}")
-                break # If it's another error, stop trying
+                bot_reply = "System currently busy. Please try again in 1 minute."
+                break 
 
     # --- 4. CHECK FOR THE SECRET CODE ---
     if "SAVE_LEAD|" in bot_reply:
