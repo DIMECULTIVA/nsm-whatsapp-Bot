@@ -2,3 +2,5 @@ flask
 twilio
 google-generativeai>=0.8.3
 gunicorn
+gspread
+oauth2client
