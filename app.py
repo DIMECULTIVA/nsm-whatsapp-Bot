@@ -30,12 +30,13 @@ if GOOGLE_API_KEY:
     GOOGLE_API_KEY = GOOGLE_API_KEY.strip().replace('"', '').replace("'", "")
     genai.configure(api_key=GOOGLE_API_KEY)
 
-# Using the Experimental Model (Less traffic, fewer 429 errors)
+# Using the EXACT model name found in your logs
+# This is the "Experimental" model (1206) which usually has fresh limits
 try:
-    model = genai.GenerativeModel('gemini-2.0-flash-exp')
+    model = genai.GenerativeModel('gemini-exp-1206')
 except:
-    # Fallback to standard if experimental is missing
-    model = genai.GenerativeModel('gemini-2.0-flash-lite')
+    # Backup if experimental fails
+    model = genai.GenerativeModel('gemini-1.5-flash')
 
 # --- 3. THE SMART PERSONA ---
 SYSTEM_PROMPT = """
@@ -86,7 +87,7 @@ def whatsapp_reply():
     bot_reply = "I apologize, connection error. Please try again." # Default fallback
 
     # --- RETRY LOOP (OPTIMIZED FOR WHATSAPP) ---
-    # Try only 2 times with a 5-second wait to beat the 15s Twilio timeout
+    # Try 2 times to beat the 15s timeout
     for attempt in range(2):
         try:
             # Send message to AI
@@ -100,24 +101,25 @@ def whatsapp_reply():
                 time.sleep(5) # Wait 5 seconds
             else:
                 print(f"Error talking to Google: {e}")
-                bot_reply = "System currently busy. Please try again in 1 minute."
-                break 
+                # Don't break immediately, try once more just in case
+                time.sleep(2)
 
     # --- 4. CHECK FOR THE SECRET CODE ---
     if "SAVE_LEAD|" in bot_reply:
         print("LEAD DETECTED! Saving to sheet...")
         try:
             parts = bot_reply.split("SAVE_LEAD|")[1].split("|")
+            # Clean up the reply so the user doesn't see the ugly code
             bot_reply = bot_reply.split("SAVE_LEAD|")[0].strip()
             
             if sheet:
                 row = [
                     str(datetime.date.today()), # Date
-                    parts[0], # Name
+                    parts[1] if len(parts) > 1 else "Unknown", # Name
                     sender_phone, # Phone
-                    parts[2] if len(parts) > 2 else "", # Type
-                    parts[3] if len(parts) > 3 else "", # Budget
-                    parts[4] if len(parts) > 4 else ""  # Notes
+                    parts[3] if len(parts) > 3 else "", # Type
+                    parts[4] if len(parts) > 4 else "", # Budget
+                    parts[5] if len(parts) > 5 else ""  # Notes
                 ]
                 sheet.append_row(row)
                 print("SAVED TO GOOGLE SHEET!")
